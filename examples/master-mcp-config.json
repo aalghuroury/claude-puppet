@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "claude-puppet": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--project",
+        "/home/ahmed/projects/claude-puppet",
+        "python",
+        "-m",
+        "server"
+      ],
+      "env": {}
+    }
+  }
+}

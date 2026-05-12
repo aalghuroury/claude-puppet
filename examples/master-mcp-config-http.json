@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "claude-puppet": {
+      "type": "http",
+      "url": "http://localhost:5056/mcp"
+    }
+  }
+}

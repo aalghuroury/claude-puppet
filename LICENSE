@@ -1,0 +1,94 @@
+PROPRIETARY SOFTWARE LICENSE
+============================
+
+Copyright (c) 2026 Ahmed Alghuroury
+All Rights Reserved.
+
+This software, including all associated source code, documentation, scripts,
+configuration files, build artifacts, schemas, designs, and any other
+materials in this repository (collectively, the "Software"), is the exclusive
+property of the copyright holder.
+
+NO LICENSE GRANTED
+------------------
+
+No license, right, or permission of any kind, express or implied, is granted
+to any party other than the copyright holder to:
+
+  (a) use the Software, in source or executable form, for any purpose,
+      whether personal, internal, academic, commercial, or otherwise;
+
+  (b) copy, reproduce, or duplicate the Software, in whole or in part;
+
+  (c) modify, adapt, translate, port, or create derivative works of the
+      Software, in whole or in part;
+
+  (d) merge the Software with or incorporate it into any other software,
+      product, or service;
+
+  (e) publish, distribute, sublicense, host, transmit, or make the Software
+      available, in any form, to any other party;
+
+  (f) sell, lease, rent, loan, or otherwise commercially exploit the
+      Software;
+
+  (g) train, fine-tune, evaluate, or otherwise use the Software (or any
+      portion thereof) as input or training data for any machine learning,
+      artificial intelligence, statistical, or data-mining system; or
+
+  (h) reverse engineer, disassemble, decompile, or attempt to derive the
+      structure, algorithms, or implementation details of the Software,
+      except to the minimum extent expressly permitted by applicable law
+      and only after written notice to the copyright holder.
+
+VIEWING PERMITTED FOR EVALUATION ONLY
+-------------------------------------
+
+Where this repository is published on a public source-hosting platform,
+viewing of the source code is permitted strictly for the purposes of
+personal evaluation and study. No other rights — including the right to
+fork, clone for any purpose other than transient evaluation, or retain
+local copies — are granted by such publication.
+
+NO CONTRIBUTOR LICENSE
+----------------------
+
+No party other than the copyright holder may submit code, documentation,
+or any other contribution to the Software with any expectation that it
+will be incorporated, accepted, or assigned. Any unsolicited contribution
+shall be deemed irrevocably assigned to the copyright holder with no
+compensation or attribution obligation, or, at the copyright holder's sole
+discretion, rejected.
+
+ENFORCEMENT
+-----------
+
+Unauthorized use, reproduction, distribution, modification, or commercial
+exploitation of the Software is strictly prohibited and constitutes
+copyright infringement. The copyright holder reserves all rights and
+remedies available under applicable copyright, trade secret, and contract
+law in any jurisdiction, including but not limited to injunctive relief,
+recovery of actual and statutory damages, and recovery of attorneys' fees
+and costs.
+
+NO WARRANTY
+-----------
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING
+FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR ANY USE OR OTHER
+DEALINGS THEREWITH.
+
+CONTACT
+-------
+
+For licensing inquiries, including requests for express written permission
+to use, distribute, or modify the Software, contact:
+
+  Ahmed Alghuroury
+  aalghuroury@gmail.com
+
+All other rights are reserved.

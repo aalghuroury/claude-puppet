@@ -1,0 +1,27 @@
+{
+  "name": "claude-puppet-pty-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Node worker: spawns claude in PTYs, renders to xterm-headless, speaks length-prefixed JSON to the Python MCP parent",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "claude-puppet-pty-bridge": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "node --test --import tsx ./test/*.test.ts",
+    "smoke": "node dist/index.js --smoke"
+  },
+  "dependencies": {
+    "@xterm/addon-serialize": "^0.13.0",
+    "@xterm/headless": "^6.0.0",
+    "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

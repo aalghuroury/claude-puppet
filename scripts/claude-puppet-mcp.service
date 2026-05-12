@@ -1,0 +1,23 @@
+[Unit]
+Description=claude-puppet MCP server (streamable-HTTP on :5056)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/claude-puppet
+# Need both uv (for python env) and node on PATH (for the pty-bridge subprocess).
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:%h/.nvm/versions/node/v24.14.1/bin:/usr/local/bin:/usr/bin:/bin
+Environment=CLAUDE_PUPPET_PORT=5056
+Environment=CLAUDE_PUPPET_HOST=127.0.0.1
+Environment=CLAUDE_PUPPET_LOG=INFO
+ExecStart=%h/.local/bin/uv run --project %h/projects/claude-puppet python -m server
+Restart=on-failure
+RestartSec=2s
+StandardOutput=journal
+StandardError=journal
+MemoryMax=1G
+CPUQuota=100%
+
+[Install]
+WantedBy=default.target

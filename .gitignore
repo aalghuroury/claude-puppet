@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.uv/
+uv.lock
+
+node_modules/
+dist/
+*.tsbuildinfo
+
+# runtime per-session state (would normally be in ~/.cache, but in case)
+.cache/
+sessions/
+
+.DS_Store
+*.log
