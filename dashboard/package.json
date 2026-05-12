@@ -1,0 +1,44 @@
+{
+  "name": "claude-puppet-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Mission-control dashboard for claude-puppet slave sessions.",
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "PORT=7780 tsx watch server/index.ts",
+    "dev:web": "vite",
+    "build": "tsc -p server && vite build",
+    "build:server": "tsc -p server",
+    "build:web": "vite build",
+    "start": "node dist/server/index.js",
+    "typecheck": "tsc -p server --noEmit && tsc -p web --noEmit"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-webgl": "^0.18.0",
+    "chokidar": "^3.6.0",
+    "express": "^4.19.2",
+    "lucide-react": "^0.453.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "ws": "^8.18.0",
+    "xterm": "^5.3.0",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.10",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/ws": "^8.5.10",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.0.1",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.8"
+  }
+}

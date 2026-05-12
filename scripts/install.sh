@@ -4,8 +4,8 @@
 # Reproduces the maintainer's working setup exactly:
 #   - MCP server registered as HTTP in ~/.claude.json under
 #     mcpServers.claude-puppet -> {type: http, url: http://localhost:5056/mcp}
-#   - claude-puppet-mcp.service installed as a systemd user unit
-#     (enabled + started)
+#   - claude-puppet-mcp.service + claude-puppet-dashboard.service installed
+#     as systemd user units (enabled + started)
 #   - SKILL.md copied to ~/.claude/skills/claude-puppet/ so any master claude
 #     auto-loads it when it hears puppet trigger phrases
 #   - Hook helpers copied to ~/.claude/hooks/ (puppet-{flush,peek,drain}.sh)
@@ -173,7 +173,7 @@ PY
 
 # ---- 7. systemd user services ----------------------------------------------
 if [[ "$INSTALL_SERVICES" -eq 1 ]]; then
-  log "Installing claude-puppet-mcp.service via install-services.sh…"
+  log "Installing claude-puppet-{mcp,dashboard}.service via install-services.sh…"
   bash "$REPO_ROOT/scripts/install-services.sh" install
 else
   warn "skipping systemd services (--no-services)"
@@ -208,6 +208,7 @@ check "[[ -x $HOOKS_DIR/puppet-flush.sh ]]" "hooks installed in $HOOKS_DIR"
 check "python3 -c \"import json; assert 'claude-puppet' in json.load(open('$CLAUDE_JSON_PATH'))['mcpServers']\" 2>/dev/null" "mcpServers.claude-puppet present in $CLAUDE_JSON_PATH"
 if [[ "$INSTALL_SERVICES" -eq 1 ]]; then
   check "systemctl --user is-active --quiet claude-puppet-mcp.service" "claude-puppet-mcp.service active"
+  check "systemctl --user is-active --quiet claude-puppet-dashboard.service" "claude-puppet-dashboard.service active"
   check "curl -sf http://localhost:5056/mcp -o /dev/null -m 2 || curl -sf http://localhost:5056/ -o /dev/null -m 2" "MCP HTTP responds at :5056"
 fi
 echo "  $ok/$tot checks passed."
@@ -220,4 +221,6 @@ Test it: open a fresh master claude session and ask
   > spawn a slave claude in /tmp/demo, have it write fizzbuzz.py, then close it
 
 If the master proposes calling open_session — the install is working.
+
+Live observation: http://localhost:5055 (dashboard)
 EOF
