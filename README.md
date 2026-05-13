@@ -2,6 +2,13 @@
 
 An MCP server that lets a "master" Claude Code session drive one or more `claude` CLI subprocesses ("slaves") through pseudo-terminals — exactly as a human would: typed keys in, rendered screen out. The slaves are unmodified `claude` binaries running in PTYs and cannot tell they are being driven.
 
+> **Note (2026-05-13):** Dashboard temporarily removed pending a round 2 fix.
+> Round 2 QA found a critical bug where the WebSocket endpoint was
+> auth-less and leaked the entire session inventory and live event stream
+> to any local process. Four other minor bugs were also found. The MCP
+> server at `:5056` is unaffected. Dashboard will return after the fix
+> is verified.
+
 ## Architecture
 
 ```
@@ -15,8 +22,6 @@ Node pty-bridge worker (node-pty + @xterm/headless)
    │  PTYs (one each)
    ▼
 slave claude   slave claude   ...
-                                          live view: http://localhost:5055
-                                          systemd: claude-puppet-dashboard.service
 ```
 
 **Hybrid Python + Node** because each language wins one half of the problem decisively:
@@ -32,7 +37,7 @@ Claude Code already ships a `Task` tool that spawns subagents (Explore, Plan, ge
 |---|---|---|
 | **Mechanism** | API call to a subagent runtime | Real `claude` CLI binary in a PTY |
 | **State** | Stateless — each `Task()` is a fresh agent | Stateful — same `session_id` persists across calls; resumable across master restarts |
-| **Observability mid-execution** | None — one response when it returns | `read_screen()`, `drain_events()`, live dashboard at :5055 |
+| **Observability mid-execution** | None — one response when it returns | `read_screen()`, `drain_events()` |
 | **Interactivity** | None — one round-trip | Full TUI: slash commands (`/plan`, `/permissions`), `@file` autocomplete, permission modals, plan-mode approvals |
 | **Permission modes** | Inherits master's | Per-slave: `strict` / `acceptEdits` / `plan` / `yolo` |
 | **Interruption** | Cannot interrupt mid-run | `interrupt()` Ctrl-C; `force=True` runs SIGINT→SIGTERM→SIGKILL ladder |
@@ -40,7 +45,7 @@ Claude Code already ships a `Task` tool that spawns subagents (Explore, Plan, ge
 | **Persistence** | Lifetime ends at function return | Slaves outlive their master — daemon owns the bridge |
 | **Recursion** | No — subagents can't spawn subagents | Yes (gated) — `nested_puppetry=True`, with monotonic permission tightening + depth cap |
 | **Multi-slave fan-out** | Sequential `Task()` calls | `drain_events(owner=…)` — one multiplexed long-poll over N slaves |
-| **Audit trail** | Inline tool result | Per-session JSONL transcript + dashboard tool-call timeline |
+| **Audit trail** | Inline tool result | Per-session JSONL transcript |
 
 **Use the built-in `Task` tool when** the work is short, structured, and one-shot ("research X, return findings").
 
@@ -62,7 +67,7 @@ That single command:
 4. Copies `hooks/puppet-{flush,peek,drain}.sh` → `~/.claude/hooks/` — token-economy helpers the master invokes via the `Bash` tool
 5. Registers the MCP server in `~/.claude.json` under `mcpServers.claude-puppet` as `{type: "http", url: "http://localhost:5056/mcp"}` *(this is the file Claude Code actually reads MCP servers from — NOT `~/.claude/settings.json`)*
 6. Sets `env.ENABLE_EXPERIMENTAL_MCP_CLI=true` in `~/.claude/settings.json`
-7. Installs `claude-puppet-mcp.service` and `claude-puppet-dashboard.service` as systemd user units, enables and starts them
+7. Installs `claude-puppet-mcp.service` as a systemd user unit, enables and starts it
 8. Runs verification checks and prints a one-line summary
 
 After install, in a fresh master session:
@@ -97,7 +102,6 @@ sudo loginctl enable-linger "$USER"
 | `~/.claude.json` → `mcpServers.claude-puppet` | MCP server registration (HTTP type) |
 | `~/.claude/settings.json` → `env.ENABLE_EXPERIMENTAL_MCP_CLI` | Enable flag |
 | `~/.config/systemd/user/claude-puppet-mcp.service` | MCP HTTP daemon at :5056 |
-| `~/.config/systemd/user/claude-puppet-dashboard.service` | Live dashboard at :5055 |
 | `~/.cache/claude-puppet/state.db` | SQLite session registry (WAL) |
 | `~/.cache/claude-puppet/sessions/<id>/` | Per-slave HOME + transcripts |
 
