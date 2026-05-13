@@ -300,6 +300,31 @@ def _materialize_home(home: Path, master_claude_dir: Path) -> None:
             settings_dst.symlink_to(settings_src)
         except OSError as e:
             log.warning("could not symlink settings: %s", e)
+    # Skills: symlink master's ~/.claude/skills/ → slave's .claude/skills/ so
+    # all of master's skills are visible to the slave. EXCEPT when the slave
+    # HOME already has a real skills/ dir (e.g. pre-populated by the v1
+    # ``puppet-prepare-role.sh`` helper before open_session). In that case
+    # leave the pre-populated dir alone — the master explicitly staged role-
+    # specific skills for this slave.
+    #
+    # Note for slave-side claude: hot-loading requires a watched skills dir at
+    # session start. Creating an empty fallback ensures the slave's claude
+    # boots with a watched dir even when master has no skills/.
+    skills_src = master_claude_dir / "skills"
+    skills_dst = claude_dir / "skills"
+    if not skills_dst.exists() and not skills_dst.is_symlink():
+        if skills_src.exists() and skills_src.is_dir():
+            try:
+                skills_dst.symlink_to(skills_src)
+            except OSError as e:
+                log.warning("could not symlink skills: %s", e)
+                # Fallback: empty dir so the slave still has a watched skills/.
+                skills_dst.mkdir(exist_ok=True)
+        else:
+            # No master skills/ — create an empty dir so the slave's claude
+            # has a watched skills/ at boot (needed for hot-load of any
+            # future puppet-prepare-role additions).
+            skills_dst.mkdir(exist_ok=True)
     # Pre-create writable subdirs so first slave write doesn't race with another.
     for sub in ("projects", "sessions", "shell-snapshots", "paste-cache", "telemetry", "backups"):
         (claude_dir / sub).mkdir(exist_ok=True)

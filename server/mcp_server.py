@@ -1393,6 +1393,442 @@ async def set_nested_puppetry(id: str, nested_puppetry: bool) -> dict[str, Any]:
         return out
 
 
+# ---------------------------------------------------------------------------
+# Swarm primitives — role-templated spawn, critique/vote, shared memory
+# ---------------------------------------------------------------------------
+
+_ROLE_DIR = Path(os.path.expanduser("~/.claude/puppet-roles"))
+
+
+def _render_role_brief(role: str, substitutions: dict[str, str]) -> str:
+    """Render a role's brief.template.md with {{INCLUDE_BASE}} + variable subs.
+
+    Raises FileNotFoundError if role doesn't exist, ValueError if any
+    {{...}} markers remain unfilled after substitution.
+    """
+    template_path = _ROLE_DIR / role / "brief.template.md"
+    base_path = _ROLE_DIR / "base.md"
+    if not template_path.exists():
+        raise FileNotFoundError(f"role brief template not found: {template_path}")
+    text = template_path.read_text()
+    base = base_path.read_text() if base_path.exists() else ""
+    text = text.replace("{{INCLUDE_BASE}}", base)
+    for k, v in substitutions.items():
+        text = text.replace("{{" + k + "}}", str(v))
+    leftovers = re.findall(r"\{\{([A-Z_][A-Z0-9_]*)\}\}", text)
+    if leftovers:
+        unique = sorted(set(leftovers))
+        raise ValueError(f"unsubstituted brief markers: {', '.join(unique)}")
+    return text
+
+
+def _prepopulate_role_skill(role: str, sid: str) -> Path:
+    """Copy role's SKILL.md into <slave-home>/.claude/skills/<role>/SKILL.md.
+
+    MUST run BEFORE the slave's claude boots so the watched skills dir exists
+    at session start. Returns the destination path.
+    """
+    src = _ROLE_DIR / role / "SKILL.md"
+    if not src.exists():
+        raise FileNotFoundError(f"role SKILL.md not found: {src}")
+    slave_home = cache_root() / sid / "home"
+    dest_dir = slave_home / ".claude" / "skills" / role
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / "SKILL.md"
+    dest.write_text(src.read_text())
+    return dest
+
+
+@mcp.tool()
+async def spawn_role(
+    role: str,
+    id: str,
+    cwd: str,
+    owner: str = "anonymous",
+    permission_mode: str = "strict",
+    target_sid: str | None = None,
+    swarm: str | None = None,
+    round_num: int = 1,
+    extra_brief_vars: dict[str, str] | None = None,
+    max_depth: int = 3,
+) -> dict[str, Any]:
+    """Spawn a slave with a pre-loaded role skill + rendered first-message brief.
+
+    Wraps the v1 master-side pattern (prepare-role → open_session → render
+    brief) into one MCP call. The role skill is pre-populated into the slave's
+    HOME BEFORE the slave's claude boots, so it's hot-loaded at session start.
+
+    Args:
+      role        one of: critic, researcher, synthesizer, planner, executor,
+                  tester, auditor. Must exist at ~/.claude/puppet-roles/<role>/.
+      id          slave session id (passed through to open_session).
+      cwd         slave's working directory.
+      owner       (default "anonymous") owner queue for events.
+      permission_mode  (default "strict") slave's permission mode.
+      target_sid  optional — for critic/auditor roles, the slave being reviewed.
+      swarm       optional swarm name; if set, brief substitutions get
+                  SWARM_NAME + SWARM_DIR auto-derived.
+      round_num   round number (for critique loops).
+      extra_brief_vars  additional substitution keys for the role brief.
+
+    Returns:
+      ``{ok, id, role, brief, ...open_session_fields}``. The ``brief`` field
+      is the rendered first-message text; the caller still needs to inject it
+      via ``send_text`` + ``send_keys(<Enter>)``.
+    """
+    args = {"role": role, "id": id, "cwd": cwd, "owner": owner,
+            "permission_mode": permission_mode, "target_sid": target_sid,
+            "swarm": swarm, "round_num": round_num}
+    with _logged(id, "spawn_role", args) as box:
+        # 1. Pre-populate role skill (before slave's claude boots).
+        try:
+            skill_path = _prepopulate_role_skill(role, id)
+        except FileNotFoundError as e:
+            raise ValueError(str(e))
+
+        # 2. Render the brief.
+        import datetime as _dt
+        subs = {
+            "ROLE": role,
+            "SID": id,
+            "DATE": _dt.date.today().isoformat(),
+            "TARGET_SID": target_sid or "",
+            "ROUND": str(round_num),
+            "SWARM_NAME": swarm or "",
+            "SWARM_DIR": (
+                str(Path.home() / ".cache" / "puppet-swarm" / swarm) if swarm else ""
+            ),
+        }
+        if extra_brief_vars:
+            for k, v in extra_brief_vars.items():
+                subs[k.upper().replace("-", "_")] = str(v)
+        try:
+            brief = _render_role_brief(role, subs)
+        except (FileNotFoundError, ValueError) as e:
+            raise ValueError(str(e))
+
+        # 3. Open the session (delegates to existing open_session machinery).
+        result = await open_session(
+            id=id, cwd=cwd, permission_mode=permission_mode, owner=owner,
+            max_depth=max_depth,
+        )
+
+        out = {
+            **result,
+            "role": role,
+            "brief": brief,
+            "skill_path": str(skill_path),
+            "note": "brief is NOT auto-injected; caller must send_text + send_keys(<Enter>)",
+        }
+        box["result"] = {"id": id, "role": role, "brief_chars": len(brief)}
+        return out
+
+
+@mcp.tool()
+async def swarm_create(name: str, brief: str | None = None) -> dict[str, Any]:
+    """Create a new swarm in the registry. Idempotent on conflict — returns
+    the existing row if one already exists with this name.
+
+    Args:
+      name   unique swarm name.
+      brief  optional project-context summary stored with the swarm row.
+    """
+    args = {"name": name, "brief_chars": len(brief) if brief else 0}
+    with _logged(None, "swarm_create", args) as box:
+        existing = db.swarm_get(name)
+        if existing:
+            box["result"] = {"name": name, "created": False}
+            return {"ok": True, "name": name, "created": False, "row": existing}
+        db.swarm_create(name, brief=brief)
+        row = db.swarm_get(name)
+        box["result"] = {"name": name, "created": True}
+        return {"ok": True, "name": name, "created": True, "row": row}
+
+
+@mcp.tool()
+async def swarm_add_member(swarm: str, sid: str, role: str) -> dict[str, Any]:
+    """Register a slave as a member of a swarm with a specific role.
+
+    Upsert — replaces the previous role if this sid was already in the swarm.
+    """
+    args = {"swarm": swarm, "sid": sid, "role": role}
+    with _logged(sid, "swarm_add_member", args) as box:
+        if db.swarm_get(swarm) is None:
+            raise ValueError(f"unknown swarm: {swarm!r}")
+        db.swarm_add_member(swarm, sid, role)
+        box["result"] = {"swarm": swarm, "sid": sid, "role": role}
+        return {"ok": True, "swarm": swarm, "sid": sid, "role": role}
+
+
+@mcp.tool()
+async def swarm_memory_append(
+    swarm: str, content: str, author_sid: str | None = None, kind: str = "note"
+) -> dict[str, Any]:
+    """Append a memory entry (timestamped) to the swarm's shared scratchpad.
+
+    Args:
+      swarm       swarm name.
+      content     the text to append.
+      author_sid  who wrote this — slave sid or None for "master".
+      kind        free-form tag (default "note"; suggested: "decision",
+                  "finding", "alert").
+    """
+    args = {"swarm": swarm, "author_sid": author_sid, "kind": kind,
+            "content_chars": len(content)}
+    with _logged(author_sid, "swarm_memory_append", args) as box:
+        if db.swarm_get(swarm) is None:
+            raise ValueError(f"unknown swarm: {swarm!r}")
+        row_id = db.swarm_memory_append(
+            swarm, content, author_sid=author_sid, kind=kind
+        )
+        box["result"] = {"swarm": swarm, "id": row_id}
+        return {"ok": True, "swarm": swarm, "id": row_id}
+
+
+@mcp.tool()
+async def swarm_memory_read(swarm: str, limit: int = 20) -> dict[str, Any]:
+    """Return the most recent N memory entries for a swarm (newest first)."""
+    args = {"swarm": swarm, "limit": limit}
+    with _logged(None, "swarm_memory_read", args) as box:
+        if db.swarm_get(swarm) is None:
+            raise ValueError(f"unknown swarm: {swarm!r}")
+        entries = db.swarm_memory_read(swarm, limit=limit)
+        members = db.swarm_members(swarm)
+        out = {"swarm": swarm, "entries": entries, "members": members}
+        box["result"] = {"swarm": swarm, "entry_count": len(entries)}
+        return out
+
+
+@mcp.tool()
+async def swarm_list() -> dict[str, Any]:
+    """Enumerate all swarms with their member counts (newest first)."""
+    with _logged(None, "swarm_list", {}) as box:
+        swarms = db.swarm_list_all()
+        box["result"] = {"count": len(swarms)}
+        return {"ok": True, "swarms": swarms}
+
+
+@mcp.tool()
+async def critique_loop(
+    producer_id: str,
+    critic_id: str,
+    rounds: int = 3,
+    swarm: str | None = None,
+    round_timeout_ms: int = 60_000,
+) -> dict[str, Any]:
+    """Orchestrate N rounds of producer ↔ critic exchange.
+
+    Each round: extract producer's recent output → inject into critic →
+    wait for critic prompt_visible → extract critic output → inject into
+    producer → wait for producer prompt_visible. Returns the per-round
+    transcript.
+
+    Requires both slaves to already be open and registered. The producer
+    should have its task already going; the critic should have been spawned
+    via ``spawn_role(role="critic", ...)`` so it has the critic skill loaded.
+    """
+    args = {"producer_id": producer_id, "critic_id": critic_id,
+            "rounds": rounds, "swarm": swarm}
+    with _logged(None, "critique_loop", args) as box:
+        _alive_or_exited(producer_id)
+        _alive_or_exited(critic_id)
+        bridge = _ensure_bridge()
+        owner = _owner_by_sid.get(producer_id) or "anonymous"
+        transcript = []
+        for r in range(1, rounds + 1):
+            # Extract producer's last chunk.
+            p_events, _ = _drain_once(owner, max_events=64, sids=[producer_id])
+            p_lines = []
+            for ev in p_events:
+                if ev.get("type") == "new_lines":
+                    p_lines.extend(ln.get("text", "") for ln in ev.get("lines", []))
+            p_text = "\n".join(p_lines[-20:]) or "(no recent producer output)"
+
+            # Render critic brief and inject.
+            try:
+                critic_prompt = _render_role_brief("critic", {
+                    "ROLE": "critic",
+                    "SID": critic_id,
+                    "TARGET_SID": producer_id,
+                    "ROUND": str(r),
+                    "DATE": __import__("datetime").date.today().isoformat(),
+                    "SWARM_NAME": swarm or "",
+                    "SWARM_DIR": (
+                        str(Path.home() / ".cache" / "puppet-swarm" / swarm)
+                        if swarm else ""
+                    ),
+                    "PRODUCER_OUTPUT": p_text,
+                })
+            except (FileNotFoundError, ValueError) as e:
+                raise RuntimeError(f"critic brief render failed: {e}")
+
+            await bridge.call("write", {
+                "id": critic_id,
+                "items": [critic_prompt, "<Enter>"],
+                "bracketedPaste": True,
+            })
+
+            # Wait for critic's prompt_visible (round_timeout_ms).
+            critic_replied = False
+            deadline = _now_ms() + round_timeout_ms
+            while _now_ms() < deadline:
+                q, sig = _ensure_owner_queue(owner)
+                sig.clear()
+                try:
+                    await asyncio.wait_for(sig.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    pass
+                c_events, _ = _drain_once(owner, max_events=64,
+                                          sids=[critic_id],
+                                          types=["prompt_visible", "new_lines"])
+                for ev in c_events:
+                    if ev.get("type") == "prompt_visible":
+                        critic_replied = True
+                        break
+                if critic_replied:
+                    break
+
+            # Extract critic's reply.
+            critic_events, _ = _drain_once(owner, max_events=64, sids=[critic_id])
+            c_lines = []
+            for ev in critic_events:
+                if ev.get("type") == "new_lines":
+                    c_lines.extend(ln.get("text", "") for ln in ev.get("lines", []))
+            c_text = "\n".join(c_lines[-30:]) or "(critic produced no output)"
+
+            transcript.append({
+                "round": r,
+                "producer_output": p_text,
+                "critic_output": c_text,
+                "critic_replied": critic_replied,
+            })
+
+            # Inject critic feedback back into producer.
+            await bridge.call("write", {
+                "id": producer_id,
+                "items": [
+                    f"Critic feedback (round {r}):\n\n{c_text}\n\n"
+                    f"Address the blockers; ignore nits unless they affect "
+                    f"correctness.",
+                    "<Enter>",
+                ],
+                "bracketedPaste": True,
+            })
+
+            # Don't wait for producer here — let next round's extract pick it up.
+
+        out = {"ok": True, "rounds": rounds, "transcript": transcript}
+        box["result"] = {"rounds": rounds, "completed": len(transcript)}
+        return out
+
+
+@mcp.tool()
+async def vote(
+    specialist_ids: list[str],
+    synthesizer_id: str,
+    swarm: str | None = None,
+    timeout_ms: int = 60_000,
+) -> dict[str, Any]:
+    """Collect N specialists' outputs, inject combined view into synthesizer.
+
+    Each specialist must have produced output (prompt_visible fired). The
+    synthesizer should have the synthesizer role skill loaded
+    (via ``spawn_role(role="synthesizer", ...)``). Returns the synthesizer's
+    reply when its prompt_visible fires.
+    """
+    args = {"specialist_ids": specialist_ids, "synthesizer_id": synthesizer_id,
+            "swarm": swarm}
+    with _logged(None, "vote", args) as box:
+        for sid in specialist_ids + [synthesizer_id]:
+            _alive_or_exited(sid)
+        bridge = _ensure_bridge()
+        owner = _owner_by_sid.get(synthesizer_id) or "anonymous"
+
+        # Collect each specialist's recent output.
+        events, _ = _drain_once(owner, max_events=256, sids=specialist_ids)
+        by_sid: dict[str, list[str]] = {sid: [] for sid in specialist_ids}
+        for ev in events:
+            if ev.get("type") != "new_lines":
+                continue
+            sid = ev.get("sid")
+            if sid in by_sid:
+                by_sid[sid].extend(ln.get("text", "") for ln in ev.get("lines", []))
+
+        # Build tagged-block payload for the synthesizer.
+        blocks = []
+        for sid in specialist_ids:
+            tail = by_sid[sid][-20:]
+            content = "\n".join(tail) if tail else "(no recent output)"
+            blocks.append(f'<slave id="{sid}">\n{content}\n</slave>')
+        combined = "\n".join(blocks)
+
+        # Render synthesizer brief with input list inlined.
+        try:
+            synth_prompt = _render_role_brief("synthesizer", {
+                "ROLE": "synthesizer",
+                "SID": synthesizer_id,
+                "TARGET_SID": "",
+                "ROUND": "1",
+                "DATE": __import__("datetime").date.today().isoformat(),
+                "SWARM_NAME": swarm or "",
+                "SWARM_DIR": (
+                    str(Path.home() / ".cache" / "puppet-swarm" / swarm)
+                    if swarm else ""
+                ),
+                "INPUT_LIST": " ".join(specialist_ids),
+            })
+        except (FileNotFoundError, ValueError) as e:
+            raise RuntimeError(f"synthesizer brief render failed: {e}")
+
+        await bridge.call("write", {
+            "id": synthesizer_id,
+            "items": [
+                f"{synth_prompt}\n\n## Specialist outputs\n\n{combined}",
+                "<Enter>",
+            ],
+            "bracketedPaste": True,
+        })
+
+        # Wait for synthesizer reply.
+        synth_replied = False
+        deadline = _now_ms() + timeout_ms
+        while _now_ms() < deadline:
+            q, sig = _ensure_owner_queue(owner)
+            sig.clear()
+            try:
+                await asyncio.wait_for(sig.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                pass
+            sd_events, _ = _drain_once(
+                owner, max_events=64, sids=[synthesizer_id],
+                types=["prompt_visible", "new_lines"],
+            )
+            for ev in sd_events:
+                if ev.get("type") == "prompt_visible":
+                    synth_replied = True
+                    break
+            if synth_replied:
+                break
+
+        # Extract synthesizer's reply.
+        sd_events, _ = _drain_once(owner, max_events=64, sids=[synthesizer_id])
+        s_lines = []
+        for ev in sd_events:
+            if ev.get("type") == "new_lines":
+                s_lines.extend(ln.get("text", "") for ln in ev.get("lines", []))
+        synthesis = "\n".join(s_lines[-50:]) or "(synthesizer produced no output)"
+
+        out = {
+            "ok": True,
+            "specialists": specialist_ids,
+            "synthesizer": synthesizer_id,
+            "synthesizer_replied": synth_replied,
+            "synthesis": synthesis,
+        }
+        box["result"] = {"specialists": len(specialist_ids), "replied": synth_replied}
+        return out
+
+
 async def _bridge_sessions_by_id() -> dict[str, dict[str, Any]]:
     bridge = _ensure_bridge()
     try:

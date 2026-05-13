@@ -40,6 +40,31 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner);
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+
+CREATE TABLE IF NOT EXISTS swarms (
+    name             TEXT PRIMARY KEY,
+    brief            TEXT,
+    created_at_ms    INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS swarm_members (
+    swarm_name       TEXT NOT NULL,
+    sid              TEXT NOT NULL,
+    role             TEXT NOT NULL,
+    joined_at_ms     INTEGER NOT NULL,
+    PRIMARY KEY (swarm_name, sid)
+);
+CREATE INDEX IF NOT EXISTS idx_swarm_members_swarm ON swarm_members(swarm_name);
+
+CREATE TABLE IF NOT EXISTS swarm_memory (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    swarm_name       TEXT NOT NULL,
+    ts_ms            INTEGER NOT NULL,
+    author_sid       TEXT,
+    kind             TEXT,
+    content          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_swarm_memory_name_ts ON swarm_memory(swarm_name, ts_ms);
 """
 
 # Additive ALTER TABLE migrations applied when the column is missing. Append-only.
@@ -139,6 +164,90 @@ def set_nested_puppetry(sid: str, nested_puppetry: bool) -> None:
             (1 if nested_puppetry else 0, sid),
         )
         c.commit()
+
+
+# ---------------------------------------------------------------------------
+# Swarm registry (multi-slave coordination groups)
+# ---------------------------------------------------------------------------
+
+
+def swarm_create(name: str, brief: str | None = None) -> None:
+    """Create a new swarm row. Raises sqlite3.IntegrityError if name conflicts."""
+    ts = int(time.time() * 1000)
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO swarms (name, brief, created_at_ms) VALUES (?, ?, ?)",
+            (name, brief, ts),
+        )
+        c.commit()
+
+
+def swarm_get(name: str) -> dict[str, Any] | None:
+    with _conn() as c:
+        row = c.execute("SELECT * FROM swarms WHERE name=?", (name,)).fetchone()
+        return dict(row) if row else None
+
+
+def swarm_list_all() -> list[dict[str, Any]]:
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT s.name, s.brief, s.created_at_ms, "
+            "       (SELECT COUNT(*) FROM swarm_members m WHERE m.swarm_name=s.name) AS member_count "
+            "FROM swarms s ORDER BY s.created_at_ms DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def swarm_add_member(swarm_name: str, sid: str, role: str) -> None:
+    """Add or replace a member's role in a swarm (upsert by (swarm,sid))."""
+    ts = int(time.time() * 1000)
+    with _conn() as c:
+        c.execute(
+            "INSERT OR REPLACE INTO swarm_members "
+            "(swarm_name, sid, role, joined_at_ms) VALUES (?, ?, ?, ?)",
+            (swarm_name, sid, role, ts),
+        )
+        c.commit()
+
+
+def swarm_members(swarm_name: str) -> list[dict[str, Any]]:
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT sid, role, joined_at_ms FROM swarm_members "
+            "WHERE swarm_name=? ORDER BY joined_at_ms ASC",
+            (swarm_name,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def swarm_memory_append(
+    swarm_name: str,
+    content: str,
+    *,
+    author_sid: str | None = None,
+    kind: str = "note",
+) -> int:
+    """Append a memory entry. Returns the new row id."""
+    ts = int(time.time() * 1000)
+    with _conn() as c:
+        cur = c.execute(
+            "INSERT INTO swarm_memory (swarm_name, ts_ms, author_sid, kind, content) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (swarm_name, ts, author_sid, kind, content),
+        )
+        c.commit()
+        return cur.lastrowid
+
+
+def swarm_memory_read(swarm_name: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Return the most recent N memory entries for a swarm, newest first."""
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT id, ts_ms, author_sid, kind, content FROM swarm_memory "
+            "WHERE swarm_name=? ORDER BY ts_ms DESC LIMIT ?",
+            (swarm_name, int(limit)),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def mark_closed(sid: str, *, code: int | None, signal: str | None, ts_ms: int) -> None:

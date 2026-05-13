@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>claude-puppet · telemetry desk</title>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='4' y='4' width='24' height='24' fill='none' stroke='%23ff7a1a' stroke-width='1.5'/><rect x='10' y='10' width='12' height='12' fill='%23ff7a1a'/><line x1='4' y1='9' x2='28' y2='9' stroke='%23ff7a1a' stroke-width='0.5' stroke-opacity='0.5'/><line x1='4' y1='23' x2='28' y2='23' stroke='%23ff7a1a' stroke-width='0.5' stroke-opacity='0.5'/></svg>"
+    />
+    <meta name="theme-color" content="#0c0b09" />
+    <!-- Server-side str-replace injects the real dashboard bearer token here
+         before serving prod HTML; vite dev leaves this empty. -->
+    <meta name="x-dashboard-token" content="" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..700,30..100,0..1;1,9..144,300..700,30..100,0..1&family=Commissioner:wght,FLAR,VOLM@300..700,0..50,0..100&family=JetBrains+Mono:ital,wght@0,400..700;1,400..700&display=swap"
+    />
+  </head>
+  <body class="bg-canvas text-fg font-ui antialiased">
+    <div id="root"></div>
+    <script type="module" src="/main.tsx"></script>
+  </body>
+</html>
